@@ -8,7 +8,8 @@ struct StreamCaptureApp: App {
         WindowGroup("StreamCapture") {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 560, minHeight: 720)
+                .frame(minWidth: 940, minHeight: 660)
+                .tint(Theme.accent)
         }
         .commands {
             CommandMenu("Recording") {

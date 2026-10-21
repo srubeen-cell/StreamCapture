@@ -314,6 +314,15 @@ final class RecorderModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([recording.url])
     }
 
+    func moveToTrash(_ recording: Recording) {
+        NSWorkspace.shared.recycle([recording.url]) { [weak self] _, error in
+            Task { @MainActor in
+                if let error { self?.errorMessage = error.localizedDescription }
+                self?.loadRecordings()
+            }
+        }
+    }
+
     func open(_ recording: Recording) {
         NSWorkspace.shared.open(recording.url)
     }
