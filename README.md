@@ -26,7 +26,15 @@ open build/StreamCapture.app
 
 Drag `build/StreamCapture.app` into Applications if you want to keep it.
 
-The first time you press Record, macOS asks for **Screen & System Audio Recording** permission. Allow it in System Settings > Privacy & Security, then quit and reopen the app. After you rebuild the app macOS may ask again.
+The first time you press Record, macOS asks for **Screen & System Audio Recording** permission. Allow it in System Settings > Privacy & Security, then quit and reopen the app.
+
+`build-app.sh` signs the app with a stable identity so macOS keeps that permission across rebuilds. It uses `$SIGN_IDENTITY` if set, otherwise your first "Apple Development" certificate, otherwise one named "StreamCapture Local Signing". With none of those it falls back to an ad-hoc signature and warns you; macOS then treats every rebuild as a new app and asks again.
+
+If macOS keeps asking even though the switch is on, the stored permission is from an older build. Reset it, then allow it once more:
+
+```bash
+tccutil reset ScreenCapture local.streamcapture.app
+```
 
 ## Using it
 
