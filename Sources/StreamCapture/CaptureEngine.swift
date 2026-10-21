@@ -26,6 +26,8 @@ struct CaptureSettings {
     var videoBitrate: Int
     var showsCursor: Bool
     var includeMicrophone: Bool
+    /// Part of the display to record, in display points (window mode follows the window).
+    var sourceRect: CGRect? = nil
 }
 
 /// Records a ScreenCaptureKit stream (picture + system audio + optional mic) to an MP4.
@@ -36,6 +38,7 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     var monitor: AudioMonitor?
 
     private var stream: SCStream?
+    private var config: SCStreamConfiguration?
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var audioInput: AVAssetWriterInput?
@@ -88,9 +91,11 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         config.queueDepth = 6
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = settings.showsCursor
+        if let rect = settings.sourceRect {
+            config.sourceRect = rect
+        }
         if #available(macOS 14.0, *) {
-            // Without these, a window that grows (e.g. goes fullscreen) is drawn unscaled
-            // and comes out cropped and off-centre. Scale it to fit, keeping its shape.
+            // Fit whatever is being recorded into the fixed output frame, keeping its shape.
             config.scalesToFit = true
             config.preservesAspectRatio = true
         }
@@ -121,7 +126,19 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
             self.outputURL = url
         }
         self.stream = stream
+        self.config = config
         try await stream.startCapture()
+    }
+
+    /// Re-aims the capture at a window that moved, resized or went fullscreen.
+    /// Pass a new filter when the window moved to another display.
+    func follow(sourceRect: CGRect, filter: SCContentFilter?) async {
+        guard let stream, let config else { return }
+        if let filter, #available(macOS 14.0, *) {
+            try? await stream.updateContentFilter(filter)
+        }
+        config.sourceRect = sourceRect
+        try? await stream.updateConfiguration(config)
     }
 
     /// Stops capture and finishes the file. Returns the saved file's URL.

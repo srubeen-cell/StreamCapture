@@ -66,6 +66,7 @@ final class RecorderModel: ObservableObject {
     private var engine: CaptureEngine?
     private var startDate: Date?
     private var timer: Timer?
+    private var followTask: Task<Void, Never>?
 
     var micSupported: Bool {
         if #available(macOS 15.0, *) { return true }
@@ -166,21 +167,37 @@ final class RecorderModel: ObservableObject {
         Task { isRecording ? await stopRecording() : await startRecording() }
     }
 
-    private func makeFilter() throws -> (SCContentFilter, CGSize) {
+    /// Where a window sits: the display showing most of it, and its rect on that display in points.
+    private static func placement(of window: SCWindow, in displays: [SCDisplay]) -> (display: SCDisplay, rect: CGRect)? {
+        func overlap(_ d: SCDisplay) -> CGFloat {
+            let r = d.frame.intersection(window.frame)
+            return r.isNull ? 0 : r.width * r.height
+        }
+        guard let display = displays.max(by: { overlap($0) < overlap($1) }), overlap(display) > 0 else { return nil }
+        let rect = window.frame.intersection(display.frame)
+            .offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
+        return (display, rect)
+    }
+
+    private func makeFilter() throws -> (SCContentFilter, CGSize, CGRect?) {
         let myBundleID = Bundle.main.bundleIdentifier
         switch sourceKind {
         case .window:
-            guard let window = windows.first(where: { $0.windowID == selectedWindowID }) else { throw RecorderError.noSource }
-            // A single-window filter also records only that window's app audio.
-            return (SCContentFilter(desktopIndependentWindow: window), window.frame.size)
+            guard let window = windows.first(where: { $0.windowID == selectedWindowID }),
+                  let placed = Self.placement(of: window, in: displays) else { throw RecorderError.noSource }
+            // Record the window's area of its display, showing only that window (and its app's
+            // sound). Unlike a window-only filter, this stays correct when the window goes
+            // fullscreen: we just follow its new rect, see followWindow(_:from:).
+            let filter = SCContentFilter(display: placed.display, including: [window])
+            return (filter, window.frame.size, placed.rect)
         case .display:
             guard let display = displays.first(where: { $0.displayID == selectedDisplayID }) else { throw RecorderError.noSource }
             let size = CGSize(width: display.width, height: display.height)
             if onlyOneApp, let app = apps.first(where: { $0.bundleIdentifier == selectedAppBundleID }) {
-                return (SCContentFilter(display: display, including: [app], exceptingWindows: []), size)
+                return (SCContentFilter(display: display, including: [app], exceptingWindows: []), size, nil)
             }
             let mine = apps.filter { $0.bundleIdentifier == myBundleID }
-            return (SCContentFilter(display: display, excludingApplications: mine, exceptingWindows: []), size)
+            return (SCContentFilter(display: display, excludingApplications: mine, exceptingWindows: []), size, nil)
         }
     }
 
@@ -189,7 +206,7 @@ final class RecorderModel: ObservableObject {
         var size = pointSize
         if #available(macOS 14.0, *) {
             scale = CGFloat(filter.pointPixelScale)
-            size = filter.contentRect.size
+            if sourceKind == .display { size = filter.contentRect.size }
         }
         var width = size.width * scale
         var height = size.height * scale
@@ -224,8 +241,9 @@ final class RecorderModel: ObservableObject {
 
         do {
             if windows.isEmpty && displays.isEmpty { await refreshSources() }
-            let (filter, pointSize) = try makeFilter()
-            let settings = captureSettings(for: filter, pointSize: pointSize)
+            let (filter, pointSize, sourceRect) = try makeFilter()
+            var settings = captureSettings(for: filter, pointSize: pointSize)
+            settings.sourceRect = sourceRect
 
             try FileManager.default.createDirectory(at: outputFolder, withIntermediateDirectories: true)
             let formatter = DateFormatter()
@@ -253,6 +271,9 @@ final class RecorderModel: ObservableObject {
 
             try await engine.start(filter: filter, settings: settings, to: url)
             self.engine = engine
+            if sourceKind == .window, let windowID = selectedWindowID {
+                followTask = Task { [weak self] in await self?.followWindow(windowID, from: sourceRect) }
+            }
             isRecording = true
             startDate = Date()
             elapsed = 0
@@ -267,12 +288,38 @@ final class RecorderModel: ObservableObject {
         }
     }
 
+    /// Keeps a window recording aimed at the window as it moves, resizes or goes fullscreen.
+    private func followWindow(_ windowID: CGWindowID, from initialRect: CGRect?) async {
+        var lastDisplay = displays.first(where: { d in
+            windows.first(where: { $0.windowID == windowID }).map { d.frame.intersects($0.frame) } ?? false
+        })?.displayID
+        var lastRect = initialRect
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard isRecording, let engine else { return }
+            // If the window is off-screen (another Space, minimised), keep the last framing.
+            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+                  let window = content.windows.first(where: { $0.windowID == windowID }),
+                  let placed = Self.placement(of: window, in: content.displays) else { continue }
+            if placed.display.displayID != lastDisplay {
+                await engine.follow(sourceRect: placed.rect,
+                                    filter: SCContentFilter(display: placed.display, including: [window]))
+            } else if placed.rect != lastRect {
+                await engine.follow(sourceRect: placed.rect, filter: nil)
+            }
+            lastDisplay = placed.display.displayID
+            lastRect = placed.rect
+        }
+    }
+
     func stopRecording() async {
         guard isRecording, let engine else { return }
         isBusy = true
         defer { isBusy = false }
         isRecording = false
         timer?.invalidate()
+        followTask?.cancel()
+        followTask = nil
         timer = nil
         self.engine = nil
         systemLevel = 0
