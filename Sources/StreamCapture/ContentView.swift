@@ -109,7 +109,7 @@ struct SourceCard: View {
         Card(title: "What to record", symbol: "rectangle.dashed") {
             HStack(spacing: 10) {
                 SourceTile(kind: .window, symbol: "macwindow",
-                           caption: "One window and its sound")
+                           caption: "One app window and its sound")
                 SourceTile(kind: .display, symbol: "display",
                            caption: "Everything on a screen")
             }
@@ -139,6 +139,15 @@ struct SourceCard: View {
                 }
                 .help("Refresh the list")
                 .accessibilityLabel("Refresh windows and screens")
+            }
+
+            if model.sourceKind == .window {
+                // macOS captures sound per app, not per browser tab.
+                Label("Records the whole window (whichever tab is showing) and all sound from that app, including other tabs. Pause or mute other tabs, or play the video in a different browser.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if model.sourceKind == .display {
