@@ -48,6 +48,10 @@ Tips:
 - Put the video in full screen inside the browser window, or use Whole screen, for the biggest picture.
 - If you add your microphone, it's saved as a second audio track.
 
+## Recording one browser tab
+
+Window recording captures every Chrome tab's sound, because macOS separates sound per app, not per tab. To record exactly one tab, use the Chrome extension in [`extension/`](extension/README.md). Its recordings appear in the Library automatically.
+
 ## Project layout
 
 | File | What it does |

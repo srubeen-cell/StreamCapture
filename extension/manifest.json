@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "StreamCapture Tab Recorder",
+  "version": "0.1.0",
+  "description": "Records just one browser tab, picture and sound, into your StreamCapture library.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabCapture", "offscreen", "downloads"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Record this tab" }
+}

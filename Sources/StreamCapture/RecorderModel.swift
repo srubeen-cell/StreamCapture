@@ -289,10 +289,17 @@ final class RecorderModel: ObservableObject {
 
     private static let mediaExtensions: Set<String> = ["mp4", "mov", "m4a", "mp3", "wav", "webm", "mkv", "gif"]
 
+    static let tabRecordingsFolder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("StreamCapture")
+
     func loadRecordings() {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
-        let urls = (try? FileManager.default.contentsOfDirectory(
-            at: outputFolder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
+        // Tab recordings from the Chrome extension land in Downloads/StreamCapture.
+        let folders = [outputFolder, Self.tabRecordingsFolder]
+        let urls = folders.flatMap { folder in
+            (try? FileManager.default.contentsOfDirectory(
+                at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
+        }
         recordings = urls
             .filter { Self.mediaExtensions.contains($0.pathExtension.lowercased()) }
             .compactMap { url in
