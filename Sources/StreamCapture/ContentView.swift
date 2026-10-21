@@ -13,6 +13,12 @@ enum Theme {
     static let success = Color(red: 0.020, green: 0.588, blue: 0.412)     // #059669
     static let warning = Color.orange
 
+    // Bright, white-based surfaces (the app always uses light mode).
+    static let background = Color(red: 0.965, green: 0.969, blue: 0.984)   // #F6F7FB
+    static let card = Color.white
+    static let hairline = Color(red: 0.898, green: 0.906, blue: 0.937)     // #E5E7EF
+    static let tileIdle = Color(red: 0.980, green: 0.980, blue: 0.992)     // #FAFAFD
+
     static let cardRadius: CGFloat = 14
     static let spacing: CGFloat = 16
 }
@@ -33,12 +39,12 @@ struct Card<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-                .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+                .fill(Theme.card)
+                .shadow(color: Color(red: 0.2, green: 0.22, blue: 0.4).opacity(0.06), radius: 10, y: 3)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06))
+                .strokeBorder(Theme.hairline)
         )
     }
 }
@@ -56,7 +62,7 @@ struct ContentView: View {
             LibraryPane()
                 .frame(minWidth: 420, maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Theme.background)
         .task { await model.refreshSources() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refreshAudioDevices()
@@ -187,11 +193,11 @@ struct SourceTile: View {
             .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(selected ? Theme.accent.opacity(0.12) : Color.primary.opacity(0.03))
+                    .fill(selected ? Theme.accent.opacity(0.08) : Theme.tileIdle)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(selected ? Theme.accent : Color.primary.opacity(0.1), lineWidth: selected ? 2 : 1)
+                    .strokeBorder(selected ? Theme.accent : Theme.hairline, lineWidth: selected ? 2 : 1)
             )
         }
         .buttonStyle(.plain)
@@ -382,7 +388,7 @@ struct RecordBar: View {
         }
         .padding(.horizontal, Theme.spacing)
         .padding(.vertical, 14)
-        .background(.bar)
+        .background(Theme.card)
         .onChange(of: model.isRecording) { recording in
             pulse = recording && !reduceMotion
         }
@@ -555,11 +561,11 @@ struct RecordingCard: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(hovering ? Color.primary.opacity(0.06) : Color(nsColor: .controlBackgroundColor))
+                .fill(hovering ? Theme.accent.opacity(0.05) : Theme.card)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06))
+                .strokeBorder(hovering ? Theme.accent.opacity(0.35) : Theme.hairline)
         )
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: hovering)

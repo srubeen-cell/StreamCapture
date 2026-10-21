@@ -10,6 +10,7 @@ struct StreamCaptureApp: App {
                 .environmentObject(model)
                 .frame(minWidth: 940, minHeight: 660)
                 .tint(Theme.accent)
+                .preferredColorScheme(.light)
         }
         .commands {
             CommandMenu("Recording") {
