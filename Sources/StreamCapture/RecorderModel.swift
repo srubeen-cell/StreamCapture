@@ -55,6 +55,7 @@ final class RecorderModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var permissionMissing = false
     @Published var recordings: [Recording] = []
+    @Published var previewImage: CGImage?
     @Published var conversionProgress: [URL: Double] = [:]
     @Published var outputFolder: URL {
         didSet {
@@ -142,6 +143,34 @@ final class RecorderModel: ObservableObject {
         }
     }
 
+    // MARK: Preview
+
+    var previewSupported: Bool {
+        if #available(macOS 14.0, *) { return true }
+        return false
+    }
+
+    /// Grabs a small still of exactly what would be recorded right now.
+    func refreshPreview() async {
+        guard #available(macOS 14.0, *) else { return }
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+              let made = try? makeFilter(using: content) else {
+            previewImage = nil
+            return
+        }
+        let (filter, _, sourceRect) = made
+        let config = SCStreamConfiguration()
+        let aspect = sourceRect.map { $0.width / max($0.height, 1) } ?? (filter.contentRect.width / max(filter.contentRect.height, 1))
+        config.width = 640
+        config.height = max(2, Int(640 / max(aspect, 0.1)))
+        if let sourceRect { config.sourceRect = sourceRect }
+        config.scalesToFit = true
+        config.preservesAspectRatio = true
+        config.showsCursor = showsCursor
+        config.capturesAudio = false
+        previewImage = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+    }
+
     // MARK: Audio routing
 
     func refreshAudioDevices() {
@@ -179,8 +208,11 @@ final class RecorderModel: ObservableObject {
         return (display, rect)
     }
 
-    private func makeFilter() throws -> (SCContentFilter, CGSize, CGRect?) {
+    private func makeFilter(using content: SCShareableContent? = nil) throws -> (SCContentFilter, CGSize, CGRect?) {
         let myBundleID = Bundle.main.bundleIdentifier
+        let windows = content?.windows ?? windows
+        let displays = content?.displays ?? displays
+        let apps = content?.applications ?? apps
         switch sourceKind {
         case .window:
             guard let window = windows.first(where: { $0.windowID == selectedWindowID }),

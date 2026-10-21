@@ -114,6 +114,8 @@ struct SourceCard: View {
                            caption: "Everything on a screen")
             }
 
+            SourcePreview()
+
             HStack(spacing: 8) {
                 if model.sourceKind == .window {
                     Picker("Window", selection: $model.selectedWindowID) {
@@ -172,6 +174,56 @@ struct SourceCard: View {
             }
         }
         .disabled(model.isRecording)
+    }
+}
+
+/// Live thumbnail of exactly what will be recorded, refreshed every second.
+struct SourcePreview: View {
+    @EnvironmentObject var model: RecorderModel
+
+    private var selectionKey: String {
+        "\(model.sourceKind.rawValue)|\(model.selectedWindowID ?? 0)|\(model.selectedDisplayID ?? 0)|\(model.onlyOneApp)|\(model.selectedAppBundleID ?? "")"
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.black.opacity(0.9))
+            if let image = model.previewImage {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .padding(4)
+            } else {
+                VStack(spacing: 6) {
+                    Image(systemName: model.previewSupported ? "eye.slash" : "macwindow")
+                        .font(.title2)
+                    Text(model.previewSupported ? "Nothing to preview yet" : "Preview needs macOS 14 or newer")
+                        .font(.callout)
+                }
+                .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(16 / 9, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(alignment: .topLeading) {
+            Text(model.isRecording ? "● REC" : "PREVIEW")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Capsule().fill(model.isRecording ? Theme.record : Color.black.opacity(0.6)))
+                .padding(8)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Preview of what will be recorded")
+        .task(id: selectionKey) {
+            model.previewImage = nil
+            while !Task.isCancelled {
+                await model.refreshPreview()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
     }
 }
 
