@@ -11,6 +11,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/StreamCapture" "$APP/Contents/MacOS/StreamCapture"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Sign with a stable identity so macOS keeps the Screen Recording permission across
 # rebuilds. An ad-hoc signature is tied to the exact binary, so every rebuild would
