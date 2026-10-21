@@ -149,6 +149,9 @@ final class RecorderModel: ObservableObject {
         if let id = monitorDeviceID, !outputDevices.contains(where: { $0.id == id }) {
             monitorDeviceID = nil
         }
+        // Monitoring is only for when the Mac's own output is silent (e.g. BlackHole).
+        // Otherwise you'd hear the sound twice, slightly out of sync, like an echo.
+        if !outputIsSilent { monitorDeviceID = nil }
     }
 
     /// Points the Mac's sound back at real speakers/headphones.
@@ -244,7 +247,7 @@ final class RecorderModel: ObservableObject {
                     await self?.stopRecording()
                 }
             }
-            if let deviceID = monitorDeviceID {
+            if outputIsSilent, let deviceID = monitorDeviceID {
                 engine.monitor = try AudioMonitor(deviceID: deviceID, volume: monitorVolume)
             }
 

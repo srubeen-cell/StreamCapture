@@ -229,30 +229,33 @@ struct SoundCard: View {
                     .symbolRenderingMode(.multicolor)
             }
 
-            Divider()
+            // Only offered when the Mac's output is silent; otherwise it would double the sound.
+            if model.outputIsSilent {
+                Divider()
 
-            HStack {
-                Label("Monitor on", systemImage: "headphones")
-                Spacer()
-                Picker("Monitor on", selection: $model.monitorDeviceID) {
-                    Text("Off").tag(AudioDeviceID?.none)
-                    ForEach(model.speakerDevices) { device in
-                        Text(device.name).tag(Optional(device.id))
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
-                .disabled(model.isRecording)
-            }
-            if model.monitorDeviceID != nil {
                 HStack {
-                    Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-                    Slider(value: $model.monitorVolume, in: 0...1)
-                        .accessibilityLabel("Monitor volume")
-                    Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                    Label("Monitor on", systemImage: "headphones")
+                    Spacer()
+                    Picker("Monitor on", selection: $model.monitorDeviceID) {
+                        Text("Off").tag(AudioDeviceID?.none)
+                        ForEach(model.speakerDevices) { device in
+                            Text(device.name).tag(Optional(device.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .disabled(model.isRecording)
                 }
-                Text("Sends a copy of the recording's sound here. Handy if your Mac's output stays on BlackHole.")
-                    .font(.caption).foregroundStyle(.secondary)
+                if model.monitorDeviceID != nil {
+                    HStack {
+                        Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                        Slider(value: $model.monitorVolume, in: 0...1)
+                            .accessibilityLabel("Monitor volume")
+                        Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                    }
+                    Text("Sends a copy of the recording's sound here. Handy if your Mac's output stays on BlackHole.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             Divider()
