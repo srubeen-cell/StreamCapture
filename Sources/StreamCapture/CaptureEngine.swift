@@ -88,6 +88,13 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         config.queueDepth = 6
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = settings.showsCursor
+        if #available(macOS 14.0, *) {
+            // Without these, a window that grows (e.g. goes fullscreen) is drawn unscaled
+            // and comes out cropped and off-centre. Scale it to fit, keeping its shape.
+            config.scalesToFit = true
+            config.preservesAspectRatio = true
+        }
+        config.backgroundColor = .black
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
         config.sampleRate = 48_000

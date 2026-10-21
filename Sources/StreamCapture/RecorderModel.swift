@@ -193,6 +193,13 @@ final class RecorderModel: ObservableObject {
 
         let maxWidth: CGFloat = quality == .high ? 3840 : 1920
         let maxHeight: CGFloat = quality == .high ? 2160 : 1080
+
+        if sourceKind == .window {
+            // Windows can resize or go fullscreen mid-recording, so record into a fixed
+            // 16:9 frame. A fullscreen video then fills it exactly; other shapes get bars.
+            width = max(width, height * 16 / 9)
+            height = width * 9 / 16
+        }
         let fit = min(1, maxWidth / width, maxHeight / height)
         width *= fit
         height *= fit
