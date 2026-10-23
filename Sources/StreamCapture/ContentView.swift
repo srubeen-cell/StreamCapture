@@ -430,6 +430,13 @@ struct RecordBar: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 statusPill
+                if let warning = model.captureWarning, model.isRecording {
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Capture warning: \(warning)")
+                }
                 Text(DurationFormat.clock(model.elapsed))
                     .font(.system(size: 26, weight: .medium, design: .monospaced))
                     .foregroundStyle(model.isRecording ? .primary : .secondary)

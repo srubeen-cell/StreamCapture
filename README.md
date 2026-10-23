@@ -57,3 +57,14 @@ Tips:
 | `Converter.swift` | Conversion presets (ffmpeg, with AVFoundation fallback) |
 | `RecorderModel.swift` | App state, picking sources, starting/stopping |
 | `ContentView.swift` | The window |
+
+
+## Capture diagnostics (updated)
+
+- The recorder checks a small sample of video pixels approximately once per second.
+- If sampled frames remain almost entirely black for at least three seconds, a warning appears below the recording status. This is a heuristic: dark scenes and black backgrounds can trigger it.
+- Frame counts and dropped-frame counts are periodically written to the macOS unified log using `NSLog` (filter for `StreamCapture`).
+- ScreenCaptureKit may intentionally omit DRM-protected content. The diagnostic does not bypass content protection.
+- Test using an ordinary, unprotected desktop window before comparing protected playback.
+
+Build on a Mac with Xcode command-line tools: `swift build` or `./scripts/build-app.sh`.

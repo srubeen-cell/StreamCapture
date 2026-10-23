@@ -53,6 +53,7 @@ final class RecorderModel: ObservableObject {
     @Published var isBusy = false
     @Published var elapsed: TimeInterval = 0
     @Published var errorMessage: String?
+    @Published var captureWarning: String?
     @Published var permissionMissing = false
     @Published var recordings: [Recording] = []
     @Published var previewImage: CGImage?
@@ -270,6 +271,7 @@ final class RecorderModel: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         errorMessage = nil
+        captureWarning = nil
 
         do {
             if windows.isEmpty && displays.isEmpty { await refreshSources() }
@@ -290,6 +292,9 @@ final class RecorderModel: ObservableObject {
                     case .microphone: self?.micLevel = level
                     }
                 }
+            }
+            engine.onDiagnostics = { [weak self] message in
+                Task { @MainActor in self?.captureWarning = message }
             }
             engine.onStopped = { [weak self] error in
                 Task { @MainActor in

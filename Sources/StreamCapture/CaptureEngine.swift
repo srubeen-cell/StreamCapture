@@ -35,6 +35,7 @@ struct CaptureSettings {
 final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     var onLevel: ((AudioSource, Float) -> Void)?
     var onStopped: ((Error) -> Void)?
+    var onDiagnostics: ((String) -> Void)?
     var monitor: AudioMonitor?
 
     private var stream: SCStream?
@@ -48,6 +49,11 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     private var lastPTS = CMTime.invalid
     private var lastLevelSent: [AudioSource: CFTimeInterval] = [:]
     private var outputURL: URL?
+    private var receivedFrames = 0
+    private var droppedFrames = 0
+    private var blackSince: CFTimeInterval?
+    private var lastDiagnosticSent: CFTimeInterval = 0
+    private var warnedAboutBlack = false
 
     // All stream outputs share one serial queue, so writer access is never concurrent.
     private let queue = DispatchQueue(label: "streamcapture.samples", qos: .userInitiated)
@@ -124,6 +130,11 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
             self.finishing = false
             self.lastPTS = .invalid
             self.outputURL = url
+            self.receivedFrames = 0
+            self.droppedFrames = 0
+            self.blackSince = nil
+            self.lastDiagnosticSent = 0
+            self.warnedAboutBlack = false
         }
         self.stream = stream
         self.config = config
@@ -199,15 +210,23 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
 
         switch type {
         case .screen:
-            guard Self.isCompleteFrame(sampleBuffer) else { return }
+            guard Self.isCompleteFrame(sampleBuffer) else {
+                droppedFrames += 1
+                publishDiagnostics()
+                return
+            }
+            receivedFrames += 1
+            inspectFrame(sampleBuffer)
             let pts = sampleBuffer.presentationTimeStamp
             if !sessionStarted {
                 writer.startSession(atSourceTime: pts)
                 sessionStarted = true
             }
             if let videoInput, videoInput.isReadyForMoreMediaData {
-                videoInput.append(sampleBuffer)
+                if !videoInput.append(sampleBuffer) { droppedFrames += 1 }
                 noteTime(pts)
+            } else {
+                droppedFrames += 1
             }
         case .audio:
             handleAudio(sampleBuffer, source: .system, input: audioInput)
@@ -215,6 +234,52 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
             if #available(macOS 15.0, *), type == .microphone {
                 handleAudio(sampleBuffer, source: .microphone, input: micInput)
             }
+        }
+    }
+
+    /// Samples a sparse grid of BGRA pixels at most once per second.
+    /// A dark scene can also trigger this warning; it is not proof of DRM.
+    private func inspectFrame(_ sampleBuffer: CMSampleBuffer) {
+        let now = CACurrentMediaTime()
+        guard now - lastDiagnosticSent >= 1 else { return }
+        lastDiagnosticSent = now
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            publishDiagnostics(); return
+        }
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let stride = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard width > 0, height > 0 else { return }
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+        var dark = 0
+        var total = 0
+        for y in 1...8 {
+            for x in 1...8 {
+                let offset = (y * height / 9) * stride + (x * width / 9) * 4
+                if Int(bytes[offset]) + Int(bytes[offset + 1]) + Int(bytes[offset + 2]) < 36 { dark += 1 }
+                total += 1
+            }
+        }
+        if dark == total {
+            if blackSince == nil { blackSince = now }
+            if let since = blackSince, now - since >= 3, !warnedAboutBlack {
+                warnedAboutBlack = true
+                onDiagnostics?("Video appears black for 3+ seconds. This may be a dark scene, a capture issue, or protected content. Protected pixels cannot be restored by changing encoder settings.")
+            }
+        } else {
+            blackSince = nil
+            warnedAboutBlack = false
+        }
+        publishDiagnostics()
+    }
+
+    private func publishDiagnostics() {
+        // Called on the serial sample queue; avoid logging every frame.
+        if receivedFrames % 60 == 0 && receivedFrames > 0 {
+            NSLog("StreamCapture: received=%d dropped=%d", receivedFrames, droppedFrames)
         }
     }
 
