@@ -5,6 +5,7 @@ let package = Package(
     name: "StreamCapture",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "StreamCapture", path: "Sources/StreamCapture")
+        .executableTarget(name: "StreamCapture", path: "Sources/StreamCapture"),
+        .testTarget(name: "StreamCaptureTests", dependencies: ["StreamCapture"])
     ]
 )

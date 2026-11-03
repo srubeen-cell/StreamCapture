@@ -166,8 +166,15 @@ struct SourceCard: View {
             DisclosureGroup("Options") {
                 VStack(alignment: .leading, spacing: 8) {
                     Picker("Quality", selection: $model.quality) {
-                        ForEach(Quality.allCases) { Text($0.rawValue).tag($0) }
+                        ForEach(Quality.allCases) { quality in
+                            Text("\(quality.rawValue), \(model.recordingStandard.frameRate(for: quality)) fps").tag(quality)
+                        }
                     }
+                    Picker("Frame-rate standard", selection: $model.recordingStandard) {
+                        ForEach(RecordingStandard.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    Text("PAL uses 25 fps in Standard quality and 50 fps in High quality.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Toggle("Show mouse pointer", isOn: $model.showsCursor)
                 }
                 .padding(.top, 6)

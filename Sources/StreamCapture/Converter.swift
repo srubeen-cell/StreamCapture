@@ -11,6 +11,13 @@ struct ConversionPreset: Identifiable, Hashable {
     let avPreset: String?
     let avFileType: AVFileType?
 
+    /// Video exports retain both system audio and the separate microphone track.
+    /// GIF has no sound; audio-only presets explicitly select their audio track.
+    var streamMappingArguments: [String] {
+        ["mp4", "mov", "webm", "mkv"].contains(fileExtension)
+            ? ["-map", "0:v:0?", "-map", "0:a?"] : []
+    }
+
     static let all: [ConversionPreset] = [
         .init(id: "mp4-small", title: "MP4, smaller file (H.264)", fileExtension: "mp4",
               ffmpegArgs: ["-c:v", "libx264", "-crf", "23", "-preset", "medium", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"],
@@ -72,7 +79,7 @@ enum Converter {
     static func convert(_ input: URL, preset: ConversionPreset, progress: @escaping (Double) -> Void) async throws -> URL {
         let output = outputURL(for: input, preset: preset)
         if let ffmpeg = ffmpegPath, let args = preset.ffmpegArgs {
-            try await runFFmpeg(ffmpeg, input: input, args: args, output: output, progress: progress)
+            try await runFFmpeg(ffmpeg, input: input, args: preset.streamMappingArguments + args, output: output, progress: progress)
         } else if let avPreset = preset.avPreset, let fileType = preset.avFileType {
             try await runExport(input, avPreset: avPreset, fileType: fileType, output: output, progress: progress)
         } else {
@@ -84,39 +91,10 @@ enum Converter {
     private static func runFFmpeg(_ ffmpeg: String, input: URL, args: [String], output: URL,
                                   progress: @escaping (Double) -> Void) async throws {
         let duration = try await AVURLAsset(url: input).load(.duration).seconds
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: ffmpeg)
-        process.arguments = ["-hide_banner", "-nostats", "-y", "-i", input.path] + args
-            + ["-progress", "pipe:1", output.path]
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        stdout.fileHandleForReading.readabilityHandler = { handle in
-            guard let text = String(data: handle.availableData, encoding: .utf8) else { return }
-            for line in text.split(separator: "\n") where line.hasPrefix("out_time_us=") {
-                if let us = Double(line.dropFirst("out_time_us=".count)), duration > 0 {
-                    progress(min(1, us / 1_000_000 / duration))
-                }
-            }
-        }
-
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            process.terminationHandler = { proc in
-                stdout.fileHandleForReading.readabilityHandler = nil
-                if proc.terminationStatus == 0 {
-                    progress(1)
-                    cont.resume()
-                } else {
-                    let log = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                    let lastLine = log.split(separator: "\n").last.map(String.init) ?? "exit code \(proc.terminationStatus)"
-                    cont.resume(throwing: ConversionError.ffmpegFailed(lastLine))
-                }
-            }
-            do { try process.run() } catch { cont.resume(throwing: error) }
-        }
+        try await FFmpegRunner.run(executable: ffmpeg,
+            arguments: ["-hide_banner", "-nostats", "-nostdin", "-n", "-i", input.path] + args
+                + ["-progress", "pipe:1", output.path],
+            duration: duration, progress: progress)
     }
 
     private static func runExport(_ input: URL, avPreset: String, fileType: AVFileType, output: URL,

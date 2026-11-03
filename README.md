@@ -7,6 +7,7 @@ A small Mac app that does the job of QuickTime + BlackHole + Loopback in one pla
 - **Loopback-style monitor.** Optionally send a copy of the recorded sound to any output device (e.g. headphones), with its own volume.
 - **Record just one app.** Pick a browser window and only that window's picture and sound get recorded. Notifications and other apps stay out.
 - **Live level meters** for system audio and (on macOS 15+) your microphone.
+- **PAL frame rates by default:** Standard quality targets 25 fps (up to 1080p); High targets 50 fps (up to 4K). Under Options, switch to 30/60 fps when needed. The frame-rate standard is remembered.
 - **Converts recordings** to MP4 (smaller / 720p / HEVC), MOV, WebM, MKV, GIF, M4A, MP3 or WAV.
 
 Only record content you have the rights to record.
@@ -47,6 +48,10 @@ Tips:
 - You can switch your Mac's output back to your speakers. The app doesn't use BlackHole.
 - Put the video in full screen inside the browser window, or use Whole screen, for the biggest picture.
 - If you add your microphone, it's saved as a second audio track.
+- Video conversions using ffmpeg retain both audio tracks, including MOV and MKV copies. Players may require you to select the microphone track separately. Audio-only ffmpeg conversions extract the system-audio track.
+- PAL here means the 25/50 fps workflow; recordings remain progressive H.264 MP4 files. ScreenCaptureKit delivers frames as content changes, so capture is variable-rate rather than a guaranteed constant-frame-rate broadcast master. Conversion presets keep the source timing (except the 12 fps GIF preset).
+- With **Only one app** enabled, an unavailable app must be selected again before recording can start. Whole-screen recording excludes StreamCapture's own windows.
+- If saving fails, recording stops and reports the error immediately.
 
 ## Project layout
 
@@ -55,6 +60,7 @@ Tips:
 | `CaptureEngine.swift` | ScreenCaptureKit stream → AVAssetWriter (H.264 + AAC) |
 | `AudioSupport.swift` | Output device list, level meter maths, monitor playback |
 | `Converter.swift` | Conversion presets (ffmpeg, with AVFoundation fallback) |
+| `FFmpegRunner.swift` | Drains conversion output and reports bounded error logs |
 | `RecorderModel.swift` | App state, picking sources, starting/stopping |
 | `ContentView.swift` | The window |
 
@@ -68,3 +74,5 @@ Tips:
 - Test using an ordinary, unprotected desktop window before comparing protected playback.
 
 Build on a Mac with Xcode command-line tools: `swift build` or `./scripts/build-app.sh`.
+
+Run regression checks with `swift test`. These exercise PAL/30/60 frame-rate selection, missing-app rejection, video audio-track mappings, and process output/error handling without capturing or generating media.

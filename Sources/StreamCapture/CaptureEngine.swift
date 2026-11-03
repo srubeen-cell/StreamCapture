@@ -3,6 +3,7 @@ import ScreenCaptureKit
 
 enum RecorderError: LocalizedError {
     case noSource
+    case noApplication
     case noFrames
     case monitorUnavailable
     case writerFailed(String)
@@ -10,6 +11,7 @@ enum RecorderError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noSource: return "Pick a screen or window to record first."
+        case .noApplication: return "Choose an available app before recording with Only one app enabled. Refresh the app list if needed."
         case .noFrames: return "Nothing was captured. Check that StreamCapture is allowed under System Settings > Privacy & Security > Screen & System Audio Recording."
         case .monitorUnavailable: return "Couldn't open that output device for monitoring."
         case .writerFailed(let reason): return "Couldn't save the recording: \(reason)"
@@ -46,6 +48,7 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     private var micInput: AVAssetWriterInput?
     private var sessionStarted = false
     private var finishing = false
+    private var writerFailure: Error?
     private var lastPTS = CMTime.invalid
     private var lastLevelSent: [AudioSource: CFTimeInterval] = [:]
     private var outputURL: URL?
@@ -128,6 +131,7 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
             self.micInput = mic
             self.sessionStarted = false
             self.finishing = false
+            self.writerFailure = nil
             self.lastPTS = .invalid
             self.outputURL = url
             self.receivedFrames = 0
@@ -170,6 +174,12 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
                     return
                 }
                 finishing = true
+                if writerFailure != nil || writer.status == .failed {
+                    let error = writerFailure ?? RecorderError.writerFailed(writer.error?.localizedDescription ?? "The media writer failed.")
+                    writer.cancelWriting()
+                    cont.resume(throwing: error)
+                    return
+                }
                 guard sessionStarted else {
                     writer.cancelWriting()
                     try? FileManager.default.removeItem(at: url)
@@ -206,7 +216,11 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     // MARK: SCStreamOutput
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard sampleBuffer.isValid, !finishing, let writer, writer.status == .writing else { return }
+        guard sampleBuffer.isValid, !finishing, writerFailure == nil, let writer else { return }
+        guard writer.status == .writing else {
+            if writer.status == .failed { reportWriterFailure() }
+            return
+        }
 
         switch type {
         case .screen:
@@ -223,8 +237,12 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
                 sessionStarted = true
             }
             if let videoInput, videoInput.isReadyForMoreMediaData {
-                if !videoInput.append(sampleBuffer) { droppedFrames += 1 }
-                noteTime(pts)
+                if videoInput.append(sampleBuffer) {
+                    noteTime(pts)
+                } else {
+                    droppedFrames += 1
+                    reportWriterFailure()
+                }
             } else {
                 droppedFrames += 1
             }
@@ -292,7 +310,18 @@ final class CaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         guard sessionStarted, let input, input.isReadyForMoreMediaData else { return }
         if input.append(sampleBuffer) {
             noteTime(sampleBuffer.presentationTimeStamp + sampleBuffer.duration)
+        } else {
+            reportWriterFailure()
         }
+    }
+
+    // Called only on the sample queue. Notify once and let the model stop capture
+    // through its normal cleanup path, instead of silently discarding more media.
+    private func reportWriterFailure() {
+        guard writerFailure == nil else { return }
+        let error = RecorderError.writerFailed(writer?.error?.localizedDescription ?? "The media writer stopped accepting samples.")
+        writerFailure = error
+        onStopped?(error)
     }
 
     private func noteTime(_ time: CMTime) {

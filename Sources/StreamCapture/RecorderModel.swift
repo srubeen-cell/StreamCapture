@@ -10,9 +10,24 @@ enum SourceKind: String, CaseIterable, Identifiable {
 }
 
 enum Quality: String, CaseIterable, Identifiable {
-    case standard = "Standard (1080p, 30 fps)"
-    case high = "High (native size, 60 fps)"
+    case standard = "Standard (up to 1080p)"
+    case high = "High (up to 4K)"
     var id: String { rawValue }
+}
+
+enum RecordingStandard: String, CaseIterable, Identifiable {
+    case pal = "PAL (25 / 50 fps)"
+    case fps30 = "30 / 60 fps"
+    var id: String { rawValue }
+
+    func frameRate(for quality: Quality) -> Int {
+        switch (self, quality) {
+        case (.pal, .standard): return 25
+        case (.pal, .high): return 50
+        case (.fps30, .standard): return 30
+        case (.fps30, .high): return 60
+        }
+    }
 }
 
 struct Recording: Identifiable, Hashable {
@@ -35,6 +50,10 @@ final class RecorderModel: ObservableObject {
     @Published var onlyOneApp = false
     @Published var selectedAppBundleID: String?
     @Published var quality: Quality = .standard
+    @Published var recordingStandard: RecordingStandard = RecordingStandard(
+        rawValue: UserDefaults.standard.string(forKey: "recordingStandard") ?? "") ?? .pal {
+        didSet { UserDefaults.standard.set(recordingStandard.rawValue, forKey: "recordingStandard") }
+    }
     @Published var showsCursor = false
 
     // Audio
@@ -66,9 +85,13 @@ final class RecorderModel: ObservableObject {
     }
 
     private var engine: CaptureEngine?
+    private var startupError: Error?
     private var startDate: Date?
     private var timer: Timer?
     private var followTask: Task<Void, Never>?
+    // Keep the recorder here so whole-screen filters can exclude it, even though
+    // it is intentionally absent from the app picker.
+    private var captureApplications: [SCRunningApplication] = []
 
     var micSupported: Bool {
         if #available(macOS 15.0, *) { return true }
@@ -108,7 +131,8 @@ final class RecorderModel: ObservableObject {
                         && !(w.title ?? "").isEmpty
                 }
                 .sorted { label(for: $0) < label(for: $1) }
-            apps = content.applications
+            captureApplications = content.applications
+            apps = captureApplications
                 .filter { $0.bundleIdentifier != myBundleID && !$0.applicationName.isEmpty }
                 .sorted { $0.applicationName.localizedCaseInsensitiveCompare($1.applicationName) == .orderedAscending }
 
@@ -213,7 +237,7 @@ final class RecorderModel: ObservableObject {
         let myBundleID = Bundle.main.bundleIdentifier
         let windows = content?.windows ?? windows
         let displays = content?.displays ?? displays
-        let apps = content?.applications ?? apps
+        let apps = content?.applications ?? captureApplications
         switch sourceKind {
         case .window:
             guard let window = windows.first(where: { $0.windowID == selectedWindowID }),
@@ -226,12 +250,20 @@ final class RecorderModel: ObservableObject {
         case .display:
             guard let display = displays.first(where: { $0.displayID == selectedDisplayID }) else { throw RecorderError.noSource }
             let size = CGSize(width: display.width, height: display.height)
-            if onlyOneApp, let app = apps.first(where: { $0.bundleIdentifier == selectedAppBundleID }) {
+            if onlyOneApp {
+                let app = try selectedApplication(in: apps)
                 return (SCContentFilter(display: display, including: [app], exceptingWindows: []), size, nil)
             }
             let mine = apps.filter { $0.bundleIdentifier == myBundleID }
             return (SCContentFilter(display: display, excludingApplications: mine, exceptingWindows: []), size, nil)
         }
+    }
+
+    func selectedApplication(in applications: [SCRunningApplication]) throws -> SCRunningApplication {
+        guard let app = applications.first(where: { $0.bundleIdentifier == selectedAppBundleID }) else {
+            throw RecorderError.noApplication
+        }
+        return app
     }
 
     private func captureSettings(for filter: SCContentFilter, pointSize: CGSize) -> CaptureSettings {
@@ -260,7 +292,7 @@ final class RecorderModel: ObservableObject {
         // H.264 needs even dimensions.
         let w = max(2, Int(width) & ~1)
         let h = max(2, Int(height) & ~1)
-        let fps = quality == .high ? 60 : 30
+        let fps = recordingStandard.frameRate(for: quality)
         let bitrate = Int(Double(w * h * fps) * (quality == .high ? 0.15 : 0.12))
         return CaptureSettings(width: w, height: h, fps: fps, videoBitrate: bitrate,
                                showsCursor: showsCursor, includeMicrophone: includeMicrophone && micSupported)
@@ -272,6 +304,7 @@ final class RecorderModel: ObservableObject {
         defer { isBusy = false }
         errorMessage = nil
         captureWarning = nil
+        startupError = nil
 
         do {
             if windows.isEmpty && displays.isEmpty { await refreshSources() }
@@ -296,18 +329,24 @@ final class RecorderModel: ObservableObject {
             engine.onDiagnostics = { [weak self] message in
                 Task { @MainActor in self?.captureWarning = message }
             }
-            engine.onStopped = { [weak self] error in
+            engine.onStopped = { [weak self, weak engine] error in
                 Task { @MainActor in
-                    self?.errorMessage = "Recording stopped: \(error.localizedDescription)"
-                    await self?.stopRecording()
+                    guard let self, let engine, self.engine === engine else { return }
+                    if self.isRecording {
+                        self.errorMessage = "Recording stopped: \(error.localizedDescription)"
+                        await self.stopRecording()
+                    } else {
+                        self.startupError = error
+                    }
                 }
             }
             if outputIsSilent, let deviceID = monitorDeviceID {
                 engine.monitor = try AudioMonitor(deviceID: deviceID, volume: monitorVolume)
             }
 
-            try await engine.start(filter: filter, settings: settings, to: url)
             self.engine = engine
+            try await engine.start(filter: filter, settings: settings, to: url)
+            if let startupError { throw startupError }
             if sourceKind == .window, let windowID = selectedWindowID {
                 followTask = Task { [weak self] in await self?.followWindow(windowID, from: sourceRect) }
             }
@@ -321,6 +360,10 @@ final class RecorderModel: ObservableObject {
                 }
             }
         } catch {
+            if let engine = self.engine {
+                self.engine = nil
+                _ = try? await engine.stop()
+            }
             errorMessage = error.localizedDescription
         }
     }
